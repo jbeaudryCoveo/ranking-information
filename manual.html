@@ -1,0 +1,66 @@
+<h1>Coveo Security Checker</h1>
+<p>The purpose of the Coveo Security Checker is to give developers/clients/partners the ability to quickly check and validate the security of the content and the used API keys.
+
+The extension is only available for Coveo people.
+</p>
+<p>
+The following will be checked on the Organization:
+<ul>
+  <li>
+* Sources
+<ul><li>
+  * Are they secured
+</li>
+</ul>
+</li>
+<li>
+* Query Pipelines
+<ul><li>
+  * Is a Search Hub condition set</li>
+  <li>* Is there a filters override defined</li>
+  </ul>
+</li>
+<li>
+* API Keys (only one of * should be true)<ul>
+  <li>* Defined for Queries only*</li>
+  <li>* Defined for Admin (more than 50 priviliges)*</li>
+  <li>* Defined for Impersonate only*</li>
+  <li>* Defined for View All</li>
+</ul>
+</li>
+</ul>
+</p>
+<p>
+The following will be checked on the Search Interface:
+<ul>
+<li>* Set debug=true </li>
+<li>* Report pipeline used</li>
+<li>* Report original set of results</li>
+<li>* Report API Key or SearchToken used</li>
+<li>* Show the priviliges of the API Key/Search Token (Queries only, Admin only, Impersonate only)</li>
+<li>* Report original set of results with `@uri`: ORIGIN</li>
+<li>* Set `pipeline` to `empty`</li>
+<li>* Execute query again: set of results must be the same as `ORIGIN`</li>
+<li>* Add 'Spoofing' Queries:
+<ul>
+  <li>* `dq=@uri`</li>
+  <li>* `dq=@sfisvisibleinapp==true @sfisvisibleinpkb==false @sfisvisibleinprm==false @sfisvisibleincsp==false`</li>
+  <li>* Execute query again: set of results must be the same as `ORIGIN`</li>
+</ul>
+</li>
+  </ul>
+  </p>  
+
+<h2>Usage</h2>>
+<p>The extension must be used in this order:
+  <ul>
+<li>* Log in into the Coveo Platform</li>
+<li>* Then you can execute the `Check Organization`<br>
+  This will provide you with the details of the organization</li>
+  <li>* Next goto the Front-end search interface and activate `Search Tracker`</li>
+<li>* Execute a couple of searches</li>
+<li>* When ready, hit `Analyze Queries`</li>
+<li>* View/Download the report</li>
+</ul>
+See also the **HELP** inside the Popup window of the Extension.
+</p>

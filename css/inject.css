@@ -1,0 +1,82 @@
+.coveo-styleguide .toast-container {
+  position: fixed;
+  top: 65px;
+  right: 0;
+  left: 0;
+  -ms-flex-align: center;
+  align-items: center;
+  -ms-flex-flow: column-reverse;
+  flex-flow: column-reverse;
+  z-index: 9999;
+  box-sizing: border-box;
+  display: -ms-flexbox;
+  display: flex;
+  pointer-events: none;
+}
+.coveo-styleguide .toast-container.mod-bottom {
+  top: inherit;
+  bottom: 20px;
+  -ms-flex-flow: column;
+  flex-flow: column;
+}
+.coveo-styleguide .toast-container.mod-bottom .toast.mod-animated {
+  animation-name: e;
+}
+.coveo-styleguide .toast-container.mod-left {
+  right: inherit;
+  left: 20px;
+  -ms-flex-align: start;
+  align-items: flex-start;
+}
+.coveo-styleguide .toast-container.mod-right {
+  right: 20px;
+  left: inherit;
+  -ms-flex-align: end;
+  align-items: flex-end;
+}
+.coveo-styleguide .toast-container .toast {
+  display: block;
+  min-width: 280px;
+  padding: 20px;
+  margin-top: 20px;
+  background-color: #009830;
+  pointer-events: all;
+}
+.coveo-styleguide .toast-container .toast.mod-warning {
+  background-color: #ecad00;
+}
+.coveo-styleguide .toast-container .toast.mod-error {
+  background-color: #ce3f00;
+}
+.coveo-styleguide .toast-container .toast.mod-hidden {
+  display: none;
+}
+.coveo-styleguide .toast-container .toast.mod-animated {
+  animation-duration: 0.3s;
+  animation-iteration-count: 1;
+  animation-name: d;
+  animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+  opacity: 0;
+}
+.coveo-styleguide .toast-container .toast a {
+  color: inherit;
+  text-decoration: underline;
+}
+.coveo-styleguide .toast-container .toast-close {
+  float: right;
+  cursor: pointer;
+}
+.coveo-styleguide .toast-container .toast-close svg {
+  width: 16px;
+  height: 16px;
+}
+.coveo-styleguide .toast-container .toast-title {
+  color: #fff;
+  font-size: 16px;
+}
+.coveo-styleguide .toast-container .toast-description {
+  margin-top: 15px;
+  color: #fff;
+  font-size: 12px;
+}
