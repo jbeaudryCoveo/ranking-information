@@ -1,0 +1,6 @@
+rankingInfo: "
+Document weights:
+\nTitle: 84; Quality: 180; Date: 570; Adjacency: 1091; Source: 500; Custom: 350; QRE: 2000; Ranking functions: 0; 
+\nQRE:\nExpression: \"add update\" Score: 2000\nRanking Functions:\n\n
+Terms weights:\nupdate: 100, 33; updating: 13, 59; \nTitle: 413; Concept: 0; Summary: 154; URI: 258; Formatted: 0; Casing: 0; Relation: 103; Frequency: 1087; \n\nadd: 100, 25; \nTitle: 0; Concept: 0; Summary: 0; URI: 0; Formatted: 0; Casing: 0; Relation: 96; Frequency: 764; \n\n
+Total weight: 7650"

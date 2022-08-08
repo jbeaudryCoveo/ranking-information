@@ -139,6 +139,17 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       return true;
     }
   }
+  else if (msg.action === 'contentJsLoaded') {
+    getTabId_Then(tabId => {
+      getState_Then(state => {
+        let enabled = false;
+        state.loadedScript = false;
+        state.enabled = enabled;
+        setEnabledSearch(enabled);
+        saveState(state, tabId);
+      });
+    });
+  }
   else if (msg.action === 'loadScripts') {
     getTabId_Then(tabId => {
       getState_Then(state => {
