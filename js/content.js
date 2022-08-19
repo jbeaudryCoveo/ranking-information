@@ -4,7 +4,7 @@
 
 let enabled = false;
 let firstTotal = 0;
-
+var addSample = false;
 
 let TermColor = 'rgb(54, 162, 235)';
 let ARTColor = 'rgb(75, 192, 192)';
@@ -15,49 +15,67 @@ let DifferenceColor = 'rgb(255, 99, 132)';
 let specificColors = ['rgb(251,156,18)', 'rgb(106,251,18)', 'rgb(18,219,251)', 'rgb(184,18,251)', 'rgb(247,18,251)'];
 let currentColors = {};
 let currentFields = [];
+let currentData = {};
 let minAll = 0;
 let maxAll = 0;
+let settings = {};
 
 function addAjaxHookSrc() {
   var s = document.createElement('script');
-  s.src = "https://unpkg.com/ajax-hook@2.1.3/dist/ajaxhook.min.js";
+  let source = chrome.runtime.getURL("js/ajaxhook.min.js");
+  s.src = source;
+  //s.src = "https://unpkg.com/ajax-hook@2.1.3/dist/ajaxhook.min.js";
   (document.head || document.documentElement).appendChild(s);
 }
 
+
 addAjaxHookSrc();
 
-function addAjaxTracker() {
+
+// onRequest: (config, handler) =>
+//     { /*console.log('AH:');
+//       console.log(config);*/
+//       hijack(config.url, handler, config)
+//       .then(( {response} ) => {
+//         //.then(({ response }) => {
+//           handler.resolve(response);
+//           /*return handler.resolve({
+//             config,
+//             status: 200,
+//             headers: [],
+//             response,
+//           })*/
+//         })
+//         .catch((error) => {/*console.log("AH:");console.log(config);console.log(error);handler.resolve(error);*/ handler.next(config);})},
+
+function addAjaxTrackerJSUI() {
   let tracker_script = `
-function hijack(url, { method }) {
-    return new Promise((resolve, reject) => {
-      //  Replace this code later 
-      resolve();
-    })
-  }
+
   if (ah) {
   ah.proxy({
-/*    onRequest: (config, handler) =>
-      hijack(config.url, config)
-        .then(({ response }) => {
-          return handler.resolve({
-            config,
-            status: 200,
-            headers: [],
-            response,
-          })
-        })
-        .catch(() => handler.next(config)),*/
     onResponse: (response, handler) => {
       //console.log("CRI: Ajax response");
       if (contentCRIEnabled) {
         console.log("CRI: Ajax response VALID");
         //console.log(response);
+        //console.log(handler);
+        if (handler.xhr.responseURL.indexOf('CRIreq')>0 && handler.xhr.status==500) {
+          //We have a problem, debug is not allowed
+          window.postMessage({removeDebug:true});
+        }
         try {
         let jsondata = JSON.parse(response.response);
-        if ('totalCount' in jsondata ) {
+        if ('totalCount' in jsondata || 'data' in jsondata ) {
           console.log("From Coveo Ranking Info");
           //console.log(json);
           //SendMessage then process it if needed
+          //In case of other clients
+          if ('data' in jsondata) {
+            jsondata = jsondata['data'];
+            if ('product' in jsondata) {
+              jsondata = jsondata['product'];
+            }
+          }
           window.postMessage({content:jsondata});
         }
         //console.log(jsondata);
@@ -75,10 +93,148 @@ function hijack(url, { method }) {
   return tracker_script;
 }
 
+
+function addAjaxTracker() {
+  let tracker_script = `
+function hijack(url, handler, { method }) {
+  
+    return new Promise((resolve, reject) => {
+      //  Replace this code later 
+      //console.log(handler);
+      //console.log('AH:'+url);
+      let changed=false;
+      let bodyjson='';
+      if (contentCRIEnabled){
+       if (handler.xhr!==undefined) {
+        if (handler.xhr.config!=undefined){
+          if (handler.xhr.config.body!=undefined) {
+            bodyjson = JSON.parse(handler.xhr.config.body);
+            //Go through complete json if we find 'searchHub or firstResult' then append context
+            Object.keys(bodyjson).map((key) => {
+              if (key=='searchHub' || key=='firstResult') {
+                bodyjson['debug']=true;
+                if (bodyjson['context']==undefined) {
+                  bodyjson['context']={};
+                }
+                bodyjson['context']['fromCRI']=true;
+                //console.log('Added CONTEXT CRI');
+                changed=true;
+              }
+              if (typeof bodyjson[key] === "object" && !Array.isArray(bodyjson[key])) {
+                //Embedded dictionary
+                Object.keys(bodyjson[key]).map((keynest) => {
+                  //console.log('keynest:'+keynest);
+                  if (keynest=='searchHub' || keynest=='firstResult') {
+                    bodyjson['debug']=true;
+                    //console.log('keynest MATCH:'+keynest);
+                    if (bodyjson[key]['context']==undefined) {
+                      bodyjson[key]['context']={};
+                    }
+                    bodyjson[key]['context']['fromCRI']=true;
+                    //console.log('Added CONTEXT CRI');
+                    changed=true;
+                  }
+                });
+              }
+
+            });
+          }
+        }
+      }
+    }
+      if (changed) {
+        //console.log("Changed");
+        handler.xhr.config.body = JSON.stringify(bodyjson);
+      }
+      //console.log(handler);
+      resolve();
+      //resolve({config:handler.xhr.config, status:handler.xhr.status, headers: handler.xhrProxy.getAllResponseHeaders(), response: handler.xhrProxy.response});
+    })
+  }
+  if (ah) {
+  ah.proxy({
+    onRequest: (config, handler) =>
+    { /*console.log('AH:');
+      console.log(config);*/
+     
+      hijack(config.url, handler, config)
+      .then(( {response} ) => {
+        //.then(({ response }) => {
+          console.log('AJAX response');
+          handler.resolve(response);
+          /*return handler.resolve({
+            config,
+            status: 200,
+            headers: [],
+            response,
+          })*/
+        })
+        .catch((error) => {/*console.log("AH:");console.log(config);console.log(error);handler.resolve(error);*/ handler.next(config);})},
+  
+
+    onResponse: (response, handler) => {
+      //console.log("CRI: Ajax response");
+      if (contentCRIEnabled) {
+        console.log("CRI: Ajax response VALID");
+        //console.log(response);
+        //console.log(handler);
+        if (handler.xhr.responseURL.indexOf('CRIreq')>0 && handler.xhr.status==500) {
+          //We have a problem, debug is not allowed
+          window.postMessage({removeDebug:true});
+        }
+        try {
+        let jsondata = JSON.parse(response.response);
+        if ('totalCount' in jsondata || 'data' in jsondata ) {
+          console.log("From Coveo Ranking Info");
+          //console.log(json);
+          //SendMessage then process it if needed
+          //In case of other clients
+          if ('data' in jsondata) {
+            jsondata = jsondata['data'];
+            if ('product' in jsondata) {
+              jsondata = jsondata['product'];
+            }
+          }
+          window.postMessage({content:jsondata});
+        }
+        //console.log(jsondata);
+        } 
+        catch{
+
+        }
+        handler.resolve(response)
+      } else {
+        handler.resolve(response)
+      }
+    },
+  })
+}`;
+  return tracker_script;
+}
 function addConsoleTracker() {
   let tracker_script = `
   var contentCRIEnabled=false;
+  var settings={};
 
+  function copyToClipboard(event,text) {
+    //console.log('COPY');
+    event.preventDefault();
+    event.stopPropagation();
+    text = decodeURIComponent(text);
+    navigator.clipboard.writeText(text).then(() => {
+      // Alert the user that the action took place.
+      // Nobody likes hidden stuff being done under the hood!
+      alert("Copied to clipboard");
+    });
+    return true;
+  }
+
+  // function toggleCharts(elem) {
+  //   chrome.storage.local.set({ showCharts: true });
+  // }
+  // function toggleTable(elem) {
+  //   chrome.storage.local.set({ showTables: true });
+  // }
   
 
 const constantMock = window.fetch;
@@ -93,10 +249,17 @@ window.fetch = function () {
            response.clone().json() //the response body is a readablestream, which can only be read once. That's why we make a clone here and work with the clone
              .then((json) => {
                //console.log(window['enabled']); 
-              if ('totalCount' in json ) {
+              if ('totalCount' in json || 'data' in json ) {
                 console.log("From Coveo Ranking Info");
                 //console.log(json);
                 //SendMessage then process it if needed
+                //In case of other clients
+                if ('data' in json) {
+                  json = json['data'];
+                  if ('product' in json) {
+                    json = json['product'];
+                  }
+                }
                 window.postMessage({content:json});
               }
               resolve(response);
@@ -136,19 +299,61 @@ window.fetch = function () {
 
 window.removeEventListener('message', reactOnMessage);
 
-//setTimeout(function () {
+function retrieveWindowVariables() {
+  var ret = {};
+  // var script = document.createElement('script');
+  // script.id = 'tmpScript';
+  // let source = chrome.runtime.getURL("js/checkCoveo.js");
+  // //script.textContent = addConsoleTracker();
+  // script.src = source;
+
+  // (document.body || document.head || document.documentElement).appendChild(script);
+
+  ret = document.getElementsByTagName('body')[0].getAttribute("tmp_Coveo");
+  //document.getElementsByTagName('body')[0].removeAttribute("tmp_Coveo");
+  //  document.getElementById("tmpScript").remove();
+
+  return ret;
+}
+
 var script = document.createElement('script');
-script.textContent = addConsoleTracker();
+let source = chrome.runtime.getURL("js/consoleTracker.js");
+//script.textContent = addConsoleTracker();
+script.src = source;
+
 (document.head || document.documentElement).appendChild(script);
 
-//}, 500);
-setTimeout(function () {
+function addAllTrackers() {
+  //setTimeout(function () {
+  //}, 500);
+  //setTimeout(function () {
   var script = document.createElement('script');
-  script.textContent = addAjaxTracker();
+  var isItJS = retrieveWindowVariables();
+  //console.log(isItJS);
+  if (isItJS && isItJS == 'Y') {
+    //console.log(isItJS);
+    console.log("THIS IS A JSUI");
+    //script.textContent = addAjaxTrackerJSUI();
+    let source = chrome.runtime.getURL("js/ajaxTrackerJS.js");
+    //script.textContent = addConsoleTracker();
+    script.src = source;
+
+  } else {
+    let source = chrome.runtime.getURL("js/ajaxTracker.js");
+    //script.textContent = addConsoleTracker();
+    script.src = source;
+    //script.textContent = addAjaxTracker();
+  }
   (document.head || document.documentElement).appendChild(script);
 
-}, 500);
+  //}, 500);
+}
 
+if (enabled) {
+  setTimeout(function () {
+    addAllTrackers();
+  }, 2500);
+}
 
 window.addEventListener("message", reactOnMessage, false);
 
@@ -169,7 +374,9 @@ const getAllChildren = (htmlElement) => {
 };
 
 function clean(text) {
-  text = text.replace(/<\/?[^>]+(>|$)/g, "").trim();
+  if (text) {
+    text = text.replace(/<\/?[^>]+(>|$)/g, "").trim();
+  }
   return text;
 }
 
@@ -178,7 +385,7 @@ function findElementWithTitle(title) {
   let element;
   const processNode = (el) => {
     if (el.innerHTML) {
-      let text = clean(el.innerHTML);
+      let text = clean(el.innerText);
       if (text == title) {
         element = el;
         return;
@@ -256,6 +463,95 @@ function findElement(uri) {
   return element;
 }
 
+
+function addLargeChartDiv(result, indexr, allLabels, chartData) {
+  let copyImage = chrome.runtime.getURL("images/copy.svg");
+  let table = '<tr><td style="padding-left:5px">Description</td><td style="text-align: right;">Value</td><td style="text-align: right;">%</td></tr>';
+  table += '<tr><td colspan=3><hr></td></tr>';
+  for (let index = 0; index < allLabels.length; index++) {
+    let element = allLabels[index];
+    let label = element['label'];
+    if (label.indexOf('|') > 0) {
+      let labels = label.split('|');
+      label = labels[0] + ' ' + labels[1];
+
+    }
+    let field = '';
+    let labeltext = '';
+    if (chartData[index].data[indexr]['f']) {
+      field = chartData[index].data[indexr]['f'];
+    }
+    let expr = '';
+    let img = '';
+    if (chartData[index].data[indexr]['l']) {
+      let more = '';
+      labeltext = chartData[index].data[indexr]['l'];
+      if (chartData[index].data[indexr]['l'].length > 50) {
+        more = '...';
+      }
+      if (field != '' || labeltext != '') {
+        let expressionEncoded = encodeURIComponent(chartData[index].data[indexr]['l']);
+        img = `<img width=15px  style='padding-right:5px'  title="Copy Expression" src=${copyImage} onclick=copyToClipboard(event,'${expressionEncoded}')>`;
+      }
+      //Not for ART a copy image
+      if (label.indexOf('by ART') > 0) {
+        img = '';
+      }
+      expr = `<br>${img}<span title='${chartData[index].data[indexr]['l']}'>${chartData[index].data[indexr]['l'].substr(0, 50)}${more}</span>`;
+    }
+    img = '';
+    element['color'] = '';
+    if (field != '') {
+      img = `<img style='padding-right:5px' title="Copy Field" onclick=copyToClipboard(event,'${chartData[index].data[indexr]['f']}') width=15px src=${copyImage}>`;
+    }
+
+    let html = `<tr><td style='padding-left:5px'>${img}${label}${expr}</td>`;
+    let color = '';
+    if (chartData[index].data[indexr]['v'] < 0) {
+      color = 'color:red;';
+    }
+    html += `<td style='${color}text-align: right;padding-left:5px;'>${Math.round(chartData[index].data[indexr]['v'])}</td><td  style='${color}text-align: right;padding-left:5px;'>${chartData[index].data[indexr]['vp']}%</td></tr>`;
+
+    table += html;
+    table += '<tr><td colspan=3><hr></td></tr>';
+  }
+  /*
+    <tr><td style='font-size:8pt;background-color: ${ARTColor};min-width:15px'></td><td style='padding-left:5px'>Boosted by ART</td>
+  <td style='font-size:8pt;background-color: ${DocumentColor};min-width:15px'></td><td style='padding-left:5px'>Document Weights</td>
+  </tr>
+  <tr><td style='font-size:8pt;background-color: ${DNEColor};min-width:15px'></td><td style='padding-left:5px'>Boosted by DNE</td>
+  <td style='font-size:8pt;background-color: ${TermColor};min-width:15px'></td><td style='padding-left:5px'>Term Weights</td>
+  </tr>
+  <tr><td style='font-size:8pt;background-color: ${DifferenceColor};min-width:15px'></td><td style='padding-left:5px'>Difference with number 1</td>
+  <td style='font-size:8pt;background-color: ${QREColor};min-width:15px'></td><td style='padding-left:5px'>QRE Expressions</td>
+  </tr>
+*/
+  //  <canvas class="ChartCRI show" id="myChartCRI${indexr}" width="350" height="300">MY CANVAS</canvas>
+
+  let charts = `<canvas class="ChartCRI show" id="myChartCRIB${indexr}" width="350" height="300">MY CANVAS</canvas>
+  <canvas class="ChartCRI show" id="myChartCRIR${indexr}" width="350" height="300">MY CANVAS</canvas>
+`;
+  // if (settings.showCharts != undefined && settings.showCharts) {
+  //   charts = '';
+  // }
+  let tablecontent = `  <table stye='border-spacing: 5px;'>${table}
+  </table>
+`;
+  // if (settings.showTable != undefined && settings.showTable) {
+  //   tablecontent = '';
+  // }
+  let div = `<div class="calloutCRI show ChartCRI top-left">Ranking Information Score: ${result.score}
+  ${charts}
+  <div style='text-align:left;width:100%;font-size:8pt;'>
+  ${tablecontent}
+  </div>
+  </div>`;
+  return div;
+}
+/*  <button onclick="toggleCharts(this)">Show/Hide Charts</button>
+  <button onclick="toggleTable(this)">Show/Hide Table</button>
+*/
+
 function addChartDiv(result, indexr, allLabels, chartData) {
   // let div = `<div class="calloutCRI top-left" onclick="window.postMessage({ type: 'OpenChart', el: ${element}, params: 'myChartCRI${index}' }, '*');">Click to see Ranking Information
   // <canvas class="ChartCRI" id="myChartCRI${index}" width="400" height="300"></canvas>
@@ -267,6 +563,9 @@ function addChartDiv(result, indexr, allLabels, chartData) {
     if (label.indexOf('|') > 0) {
       let labels = label.split('|');
       label = labels[0] + ' ' + labels[1];
+      if (labels.length > 2) {
+        label += '<br>' + labels[2].substr(0, 50);
+      }
     }
     element['color'] = '';
     let html = `<tr><td style='font-size:8pt;background-color: ${element['color']};min-width:15px'></td><td style='padding-left:5px'>${label}</td>`;
@@ -274,13 +573,16 @@ function addChartDiv(result, indexr, allLabels, chartData) {
     if (chartData[index].data[indexr]['v'] < 0) {
       color = 'color:red;';
     }
-    html += `<td style='${color}text-align: right;'>${Math.round(chartData[index].data[indexr]['v'])}</td><td  style='${color}text-align: right;'>${chartData[index].data[indexr]['vp']}%</td>`;
+    html += `<td style='${color}text-align: right;padding-left:5px;'>${Math.round(chartData[index].data[indexr]['v'])}</td><td  style='${color}text-align: right;padding-left:5px;'>${chartData[index].data[indexr]['vp']}%</td>`;
     if (Math.ceil(allLabels.length / 2) + (index) < allLabels.length) {
       element = allLabels[Math.ceil(allLabels.length / 2) + (index)];
       label = element['label'];
       if (label.indexOf('|') > 0) {
         let labels = label.split('|');
         label = labels[0] + ' ' + labels[1];
+        if (labels.length > 2) {
+          label += '<br>' + labels[2].substr(0, 50);
+        }
       }
       element['color'] = '';
       html += `<td style='font-size:8pt;background-color: ${element['color']};min-width:15px'></td><td style='padding-left:5px'>${label}</td>`;
@@ -288,7 +590,7 @@ function addChartDiv(result, indexr, allLabels, chartData) {
       if (chartData[Math.ceil(allLabels.length / 2) + (index)].data[indexr]['v'] < 0) {
         color = 'color:red;';
       }
-      html += `<td style='${color}text-align: right;'>${Math.round(chartData[Math.ceil(allLabels.length / 2) + (index)].data[indexr]['v'])}</td><td  style='${color}text-align: right;'>${chartData[Math.ceil(allLabels.length / 2) + (index)].data[indexr]['vp']}%</td></tr>`;
+      html += `<td style='${color}text-align: right;padding-left:5px;'>${Math.round(chartData[Math.ceil(allLabels.length / 2) + (index)].data[indexr]['v'])}</td><td  style='${color}text-align: right;padding-left:5px;'>${chartData[Math.ceil(allLabels.length / 2) + (index)].data[indexr]['vp']}%</td></tr>`;
     } else {
       html += `<td></td><td></td><td></td></tr>`;
     }
@@ -307,10 +609,12 @@ function addChartDiv(result, indexr, allLabels, chartData) {
 */
   //  <canvas class="ChartCRI show" id="myChartCRI${indexr}" width="350" height="300">MY CANVAS</canvas>
 
-  let div = `<div class="calloutCRI show ChartCRI top-left">Ranking Information
+  let div = `<div class="calloutCRI show ChartCRI top-left">Ranking Information Score: ${result.score}
   <canvas class="ChartCRI show" id="myChartCRIB${indexr}" width="350" height="300">MY CANVAS</canvas>
   <canvas class="ChartCRI show" id="myChartCRIR${indexr}" width="350" height="300">MY CANVAS</canvas>
+  <button onclick="toggleTheme()">Show/Hide Charts</button>
   <div style='text-align:left;width:100%;font-size:8pt;'>
+  <button onclick="toggleTheme()">Show/Hide Table</button>
   <table stye='border-spacing: 5px;'>${table}
   </table>
   </div>
@@ -387,6 +691,13 @@ function getMinMaxNeg(min, max, current) {
   return [minval, maxval]
 }
 
+
+function sampleData() {
+  if (addSample)
+    return "Document weights:\nTitle: 400; Quality: 180; Date: 0; Adjacency: 0; Source: 500; Custom: 350; QRE: 1100; Ranking functions: 0; \nQRE:\nExpression: \"(@ps_product_rank=1..25)\" Score: 0\nExpression: \"(@ps_product_rank=26..50)\" Score: 0\nExpression: \"(@ps_product_rank=51..5)\" Score: 0\nExpression: \"@ps_product_sold_on_philips==true\" Score: 350\nExpression: \"@ps_product_accessory==true OR @ps_productcategory=accessories\" Score: 0\nExpression: \"@ps_productid_partial=blade\" Score: 0\nExpression: \"@filetype==pdf\" Score: 0\nExpression: \"@ps_productid==blade OR @ps_productid_stripped==blade\" Score: 0\nExpression: \"@ps_product_status==normal\" Score: 0\nExpression: \"@ps_productcategories=(blade)\" Score: 0\nExpression: \"@ps_product_promotion==true\" Score: 0\nExpression: \"@ps_product_status==new\" Score: 0\nExpression: \"@ps_product_consumer_status==new\" Score: 750\nExpression: \"@ps_product_consumer_status==normal\" Score: 0\nRanking Functions:\n\nTerms weights:\nblade: 100, 32; \nTitle: 800; Concept: 0; Summary: 480; URI: 500; Formatted: 0; Casing: 0; Relation: 0; Frequency: 301; \n\nTotal weight: 4611";
+  else return null;
+}
+
 function processAllResults(results, rankingExpressions) {
 
   let min = {};
@@ -400,8 +711,15 @@ function processAllResults(results, rankingExpressions) {
   //Calculate min/max
   //Calculate for each item the charts 
   let allBarLabels = [];
+  let chartData = [];
+  let labels = [];
+  currentData = {};
+  if (!results) return { chartData, allBarLabels, labels };
   results.map((result, index) => {
-    if (result.rankingInfo == null) return;
+    if (result.rankingInfo == null) {
+      result.rankingInfo = sampleData();
+    }
+    if (result.rankingInfo == null) { return { chartData, allBarLabels, labels }; }
     //if (index <= 3) {
     allBarLabels.push(index + 1);
     //}
@@ -479,11 +797,13 @@ function processAllResults(results, rankingExpressions) {
           }
           //Check if expression is inside the rankingExpressions and isConstant: true ==> then it is QRE else DNE
           let isDNE = false;
-          rankingExpressions.map((expr) => {
-            if (expr.expression == label && expr.isConstant == false) {
-              isDNE = true;
-            }
-          });
+          if (rankingExpressions) {
+            rankingExpressions.map((expr) => {
+              if (expr.expression == label && expr.isConstant == false) {
+                isDNE = true;
+              }
+            });
+          }
           if (isDNE) {
             //colors.push(DNEColor);
             //labels.push('DNE: ' + label);
@@ -521,7 +841,10 @@ function processAllResults(results, rankingExpressions) {
   firstTotal = 0;
   //Now we have the min/max let's calculate everything for the final charts
   results.map((result, index) => {
-
+    if (result.rankingInfo == null) {
+      result.rankingInfo = sampleData();
+    }
+    if (result.rankingInfo == null) { return { chartData, allBarLabels, labels }; }
     let score = result.percentScore;
     let { documentWeights,
       termsWeight,
@@ -548,7 +871,7 @@ function processAllResults(results, rankingExpressions) {
     //docWeightTotal = docWeightTotal * (result.percentScore / 100);
     if (allValues['docs'] == undefined) {
       allValues['docs'] = {};
-      allLabels['docs'] = "Document weights";
+      allLabels['docs'] = "Score Document";
       allIndexes['docs'] = 0;
       allColors['docs'] = DocumentColor;
     }
@@ -580,7 +903,7 @@ function processAllResults(results, rankingExpressions) {
       //total = (parseInt(total * (result.percentScore / 100)));
       if (allValues['Term' + label] == undefined) {
         allValues['Term' + label] = {};
-        allLabels['Term' + label] = "Term weights for:|" + label.trim();
+        allLabels['Term' + label] = "Score Query Term:|" + label.trim();
         allIndexes['Term' + label] = Object.keys(allIndexes).length;
         allColors['Term' + label] = TermColor;
       }
@@ -595,6 +918,7 @@ function processAllResults(results, rankingExpressions) {
       let total = key.score;
       let label = key.expression;
       let field = key.fields;
+      let cleanfield = key.cleanfields;
 
       if (total != 0) {
         totalPerc = (total / totalForPercentageCalc) * 100;// * (result.percentScore / 100);
@@ -617,7 +941,7 @@ function processAllResults(results, rankingExpressions) {
             }
           }
           //if (total == 0) total = -5;
-          allValues['ART'][index] = ({ 'm': totalVal - min['ART'], 'v': totalVal, 'vp': Math.round(totalPerc), 'y': total, 'x': index + 1, 'mi': min['ART'], 'ma': max['ART'] });
+          allValues['ART'][index] = ({ 'l': label, 'm': totalVal - min['ART'], 'v': totalVal, 'vp': Math.round(totalPerc), 'y': total, 'x': index + 1, 'mi': min['ART'], 'ma': max['ART'] });
 
 
         } else {
@@ -636,11 +960,13 @@ function processAllResults(results, rankingExpressions) {
           }
           //Check if expression is inside the rankingExpressions and isConstant: true ==> then it is QRE else DNE
           let isDNE = false;
-          rankingExpressions.map((expr) => {
-            if (expr.expression == label && expr.isConstant == false) {
-              isDNE = true;
-            }
-          });
+          if (rankingExpressions) {
+            rankingExpressions.map((expr) => {
+              if (expr.expression == label && expr.isConstant == false) {
+                isDNE = true;
+              }
+            });
+          }
           if (isDNE) {
             //colors.push(DNEColor);
             //labels.push('DNE: ' + label);
@@ -668,7 +994,7 @@ function processAllResults(results, rankingExpressions) {
               total = -100;
             }
             //if (total == 0) total = -5;
-            allValues['DNE' + field][index] = ({ 'm': totalVal - min['DNE' + field], 'v': totalVal, 'vp': Math.round(totalPerc), 'y': total, 'x': index + 1, 'mi': min['DNE' + field], 'ma': max['DNE' + field] });
+            allValues['DNE' + field][index] = ({ 'l': label, 'm': totalVal - min['DNE' + field], 'v': totalVal, 'vp': Math.round(totalPerc), 'y': total, 'x': index + 1, 'mi': min['DNE' + field], 'ma': max['DNE' + field] });
 
 
           } else {
@@ -697,7 +1023,7 @@ function processAllResults(results, rankingExpressions) {
             }
 
             //if (total == 0) total = -5;
-            allValues[field][index] = ({ 'm': totalVal - min[field], 'v': totalVal, 'vp': Math.round(totalPerc), 'y': total, 'x': index + 1, 'mi': min[field], 'ma': max[field] });
+            allValues[field][index] = ({ 'l': label, 'f': cleanfield, 'm': totalVal - min[field], 'v': totalVal, 'vp': Math.round(totalPerc), 'y': total, 'x': index + 1, 'mi': min[field], 'ma': max[field] });
           }
         }
       }
@@ -705,8 +1031,6 @@ function processAllResults(results, rankingExpressions) {
   });
   //Now we have everything. Construct the chart data
   let chartIndex = Object.keys(allIndexes).sort(function (a, b) { return allIndexes[a] - allIndexes[b] });
-  let chartData = [];
-  let labels = [];
   for (let index = 0; index < chartIndex.length; index++) {
     const element = chartIndex[index];
     let label = allLabels[element];
@@ -731,11 +1055,27 @@ function processAllResults(results, rankingExpressions) {
 }
 
 function processTheResults(info) {
+  //First processAll The Results
+  //Check for weird stuff (B..n..gs)
+  if (info.results == undefined) {
+    if (info.data !== undefined) {
+      if (info.data.product !== undefined) {
+        info.results = info.data.product.results;
+        info.rankingExpressions = info.data.product.rankingExpressions;
+      }
+    }
+  }
+  //If still not good
+  if (info.results == undefined) return;
   firstTotal = 0;
   currentColors = {};
   currentFields = [];
-  //First processAll The Results
   let { chartData, allBarLabels, labels } = processAllResults(info.results, info.rankingExpressions);
+  currentData['chartData'] = chartData;
+  currentData['allBarLabels'] = allBarLabels;
+  currentData['labels'] = labels;
+  currentData['results'] = info.results;
+  currentData['rank'] = info.rankingExpressions;
   info.results.map((result, index) => {
     //Get the clickUri
     let uri = result.clickUri;
@@ -749,12 +1089,13 @@ function processTheResults(info) {
     if (element) {
       try {
         //First check if there is already an element
+        //element.style = 'background:red';
         $(element.parentElement.parentElement).children('.calloutCRI').remove();
         if (result.rankingInfo == null) {
           $(addChartEmptyDiv()).insertBefore(element.parentElement);
         } else {
 
-          let thediv = $(addChartDiv(result, index, labels, chartData)).insertBefore(element.parentElement);
+          let thediv = $(addLargeChartDiv(result, index, labels, chartData)).insertBefore(element.parentElement);
           let from = 0;
           let to = 0;
           from = index - 1;
@@ -768,7 +1109,9 @@ function processTheResults(info) {
           drawChart(thediv[0].firstElementChild, thediv[0].firstElementChild.nextElementSibling, thediv[0].children[2], result, index, from, to, info.rankingExpressions, chartData, allBarLabels);
         }
       }
-      catch {
+      catch (error) {
+        console.log("Error from CRI");
+        console.log(error);
 
       }
     }
@@ -776,9 +1119,69 @@ function processTheResults(info) {
   //drawChart();
 }
 
+function scrollFunction() {
+  if (enabled) {
+    if (currentData) {
+      currentData.results.map((result, index) => {
+        //Get the clickUri
+        let uri = result.clickUri;
+        //Find  it in the UI
+        let element = findElement(uri);
+        //let element = $('a[href*="' + uri + '"]').first();
+        if (!element) {// && element.length == 0) {
+          //Not found try to find it with the title
+          element = findElementWithTitle(result.Title);
+        }
+        if (element) {
+          try {
+            //First check if there is already an element
+            //element.style = 'background:red';
+            //First check if .calloutCRI is there if so, skip
+            if ($(element.parentElement.parentElement).children('.calloutCRI').length == 0) {
+              $(element.parentElement.parentElement).children('.calloutCRI').remove();
+              if (result.rankingInfo == null) {
+                $(addChartEmptyDiv()).insertBefore(element.parentElement);
+              } else {
+
+                let thediv = $(addChartDiv(result, index, currentData.labels, currentData.chartData)).insertBefore(element.parentElement);
+                let from = 0;
+                let to = 0;
+                from = index - 1;
+                if (from < 0) from = 0;
+                to = from + 3;
+                if (to > currentData.results.length) {
+                  to = currentData.results.length;
+                  from = to - 3;
+                }
+                //
+                drawChart(thediv[0].firstElementChild, thediv[0].firstElementChild.nextElementSibling, thediv[0].children[2], result, index, from, to, currentData.rank, currentData.chartData, currentData.allBarLabels);
+              }
+            }
+          }
+          catch (error) {
+            console.log("Error from CRI");
+            console.log(error);
+
+          }
+        }
+      });
+    }
+  }
+}
+
+window.onscroll = scrollFunction; //for lazy loading sites?
+
+
 function reactOnMessage(event) {
   //console.log('from me');
   //console.log(JSON.stringify(event.data.content));
+  if (event.data.removeDebug != undefined) {
+    //We need to removeDebug from the requests for this page
+    chrome.runtime.sendMessage({
+      action: "removeDebug",
+      url: window.location.toString()
+    });
+  }
   if (event.data.type != undefined) {
     if (event.data.type == 'OpenChart') {
       drawChart(event.data.el, event.data.params);
@@ -814,6 +1217,7 @@ div.calloutCRI {
   /*top: -20px;*/
 	color: #000;
 	padding: 10px;
+  z-index: 100000;
 	border-radius: 3px;
 	/*box-shadow: 0px 0px 20px #999;*/
 	margin: 25px;
@@ -870,13 +1274,19 @@ div.calloutCRI {
   /*left: 25%;
   top: 50%;*/
   /*height:275px;*/
-  font-size: 17px;
+  font-size: 14px;
 }
 
-#toastedCRI.show,#toastedCRIError.show, .ChartCRI.show {
+#toastedCRI.show,#toastedCRIError.show {
     visibility: visible;
-    /*-webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
-    animation: fadein 0.5s, fadeout 0.5s 2.5s;*/
+    -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+    animation: fadein 0.5s, fadeout 0.5s 2.5s;
+}
+.ChartCRI.show {
+  visibility: visible;
+  background: white !important;
+  /*-webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+  animation: fadein 0.5s, fadeout 0.5s 2.5s;*/
 }
 
 @-webkit-keyframes fadein {
@@ -913,16 +1323,20 @@ div.calloutCRI {
   var x = document.getElementById("toastedCRI");
   if (x == undefined) {
 
-    chrome.runtime.sendMessage({
-      action: "loadScripts",
-      url: window.location.toString()
-    });
+
     var htmlM = document.createElement('div');
     htmlM.innerHTML = html;
     (document.body || document.documentElement).appendChild(htmlM);
   }
 
 }
+
+setTimeout(function () {
+  chrome.runtime.sendMessage({
+    action: "loadScripts",
+    url: window.location.toString()
+  });
+}, 500);
 
 chrome.runtime.sendMessage({
   action: "contentJsLoaded",
@@ -1108,6 +1522,24 @@ const parseExpression = (value) => {
   return fieldText;
 }
 
+const parseExpressionNoClean = (value) => {
+  const REGEX_FIELDS =
+    /(@.*?)=/g;
+  let exprRegexResult = REGEX_FIELDS.exec(value);
+
+  const fields = [];
+  while (exprRegexResult) {
+    let field = exprRegexResult[1];
+
+    fields.push(field);
+    exprRegexResult = REGEX_FIELDS.exec(value);
+  }
+
+  let fieldText = '';
+  fieldText = fields.join(' ');
+  return fieldText;
+}
+
 const parseQREWeights = (value) => {
   const REGEX_EXTRACT_QRE_WEIGHTS =
     /Expression:\s"(.*)"\sScore:\s(?!0)([-0-9]+)\n+/g;
@@ -1119,7 +1551,8 @@ const parseQREWeights = (value) => {
     qreWeights.push({
       expression: qreWeightsRegexResult[1],
       score: parseInt(qreWeightsRegexResult[2], 10),
-      fields: parseExpression(qreWeightsRegexResult[1])
+      fields: parseExpression(qreWeightsRegexResult[1]),
+      cleanfields: parseExpressionNoClean(qreWeightsRegexResult[1])
     });
     qreWeightsRegexResult = REGEX_EXTRACT_QRE_WEIGHTS.exec(value);
   }
@@ -1171,6 +1604,9 @@ function drawChart(/*ctxbar,*/ ctxradar1, ctxradar, ctx, result, index, from, to
       if (label.indexOf('|') > 0) {
         let labels = label.split('|');
         label = [labels[0], labels[1]];
+        // if (labels.length > 2) {
+        //   label.push(labels[2].substr(1, 50));
+        // }
       }
       radarlabels.push(label);
       dataobject['label'] = barChartData[dat].label;
@@ -1183,15 +1619,17 @@ function drawChart(/*ctxbar,*/ ctxradar1, ctxradar, ctx, result, index, from, to
       dataobject['data'] = [];
       for (let x = from; x < to; x++) {
         if (first) newlabels.push(allBarLabels[x]);
-        let data = JSON.parse(JSON.stringify(barChartData[dat].data[x]));
-        if (x == index && data['v'] > 0) piedata.push(data);
-        if (x == 0) { } else {
-          //let y = reference[dat].data[0]['y'] - data['y'];
-          let y = data['y'] - reference[dat].data[0]['y'];
-          data['y'] = y;
-          data['f'] = reference[dat].data[0]['v'];
+        if (barChartData[dat].data[x] != undefined) {
+          let data = JSON.parse(JSON.stringify(barChartData[dat].data[x]));
+          if (x == index && data['v'] > 0) piedata.push(data);
+          if (x == 0) { } else {
+            //let y = reference[dat].data[0]['y'] - data['y'];
+            let y = data['y'] - reference[dat].data[0]['y'];
+            data['y'] = y;
+            data['f'] = reference[dat].data[0]['v'];
+          }
+          dataobject['data'].push(data);
         }
-        dataobject['data'].push(data);
         //if (index == x) radardata.push(data);
         indexs = indexs + 1;
       }
@@ -1200,8 +1638,10 @@ function drawChart(/*ctxbar,*/ ctxradar1, ctxradar, ctx, result, index, from, to
       first = false;
     } else {
       for (let x = from; x < to; x++) {
-        let data = JSON.parse(JSON.stringify(barChartData[dat].data[x]));
-        if (x == index) piedata.push(data);
+        if (barChartData[dat].data[x] != undefined) {
+          let data = JSON.parse(JSON.stringify(barChartData[dat].data[x]));
+          if (x == index) piedata.push(data);
+        }
         indexs = indexs + 1;
       }
     }
@@ -1236,9 +1676,11 @@ function drawChart(/*ctxbar,*/ ctxradar1, ctxradar, ctx, result, index, from, to
       radarobject['data'] = [];
       for (let dat = 0; dat < barChartData.length; dat++) {
         if (barChartData[dat].backgroundColor != DifferenceColor) {
-          let data = JSON.parse(JSON.stringify(barChartData[dat].data[x]));
-          //radarobject['data'].push(data['y']);
-          radarobject['data'].push(data);
+          if (barChartData[dat].data[x] != undefined) {
+            let data = JSON.parse(JSON.stringify(barChartData[dat].data[x]));
+            //radarobject['data'].push(data['y']);
+            radarobject['data'].push(data);
+          }
         }
       }
       radarobject1 = JSON.parse(JSON.stringify(radarobject));
@@ -1267,8 +1709,10 @@ function drawChart(/*ctxbar,*/ ctxradar1, ctxradar, ctx, result, index, from, to
     radarobject['data'] = [];
     for (let dat = 0; dat < barChartData.length; dat++) {
       if (barChartData[dat].backgroundColor != DifferenceColor) {
-        let data = JSON.parse(JSON.stringify(barChartData[dat].data[x]));
-        radarobject['data'].push(data);
+        if (barChartData[dat].data[x] != undefined) {
+          let data = JSON.parse(JSON.stringify(barChartData[dat].data[x]));
+          radarobject['data'].push(data);
+        }
       }
     }
     radarobject1 = JSON.parse(JSON.stringify(radarobject));
@@ -1497,13 +1941,16 @@ function drawChart(/*ctxbar,*/ ctxradar1, ctxradar, ctx, result, index, from, to
             label: function (context) {
               let labels = [];
               labels.push('Result ' + context.raw.x);
+              if (context.raw.l) {
+                labels.push('Expression: ' + context.raw.l);
+              }
               //labels.push(context.label);
               //console.log(context);
               labels.push('');
-              labels.push('Value: ' + parseInt(context.raw.v));
-              if (context.raw.mi != undefined) {
-                labels.push('Min:' + parseInt(context.raw.mi) + ', Max: ' + parseInt(context.raw.ma));
-              }
+              labels.push('Boosted with: ' + parseInt(context.raw.v));
+              // if (context.raw.mi != undefined) {
+              //   labels.push('Min:' + parseInt(context.raw.mi) + ', Max: ' + parseInt(context.raw.ma));
+              // }
               //labels.push('Difference (max-min-first): ' + parseInt(context.raw.y) + '%');
               let prefix = "Reduces ";
               let val = context.raw.y;
@@ -1573,13 +2020,16 @@ function drawChart(/*ctxbar,*/ ctxradar1, ctxradar, ctx, result, index, from, to
             label: function (context) {
               let labels = [];
               labels.push('Result ' + context.raw.x);
+              if (context.raw.l) {
+                labels.push('Expression: ' + context.raw.l);
+              }
               //labels.push(context.label);
               //console.log(context);
               labels.push('');
-              labels.push('Value: ' + parseInt(context.raw.v));
-              if (context.raw.mi != undefined) {
-                labels.push('Min:' + parseInt(context.raw.mi) + ', Max: ' + parseInt(context.raw.ma));
-              }
+              labels.push('Boosted with: ' + parseInt(context.raw.v));
+              // if (context.raw.mi != undefined) {
+              //   labels.push('Min:' + parseInt(context.raw.mi) + ', Max: ' + parseInt(context.raw.ma));
+              // }
               //labels.push('Difference (max-min-first): ' + parseInt(context.raw.y) + '%');
               let prefix = "Reduces ";
               let val = context.raw.y;
@@ -1696,10 +2146,26 @@ if (chrome && chrome.runtime && chrome.runtime.onMessage) {
     console.log(request);
     if (request.type === 'enabled') {
       enabled = request.global.enabled;
+      settings = request.settings;
       if (enabled) {
+        addAllTrackers();
         // alert('Ranking Information Enabled.\nExecute a new query and click on one of your results to see the Ranking Information.');
         var script = document.createElement('script');
-        script.textContent = 'contentCRIEnabled=true;';
+        let source = chrome.runtime.getURL("js/enableCRI.js");
+        script.src = source;
+
+        //script.textContent = 'contentCRIEnabled=true;';
+        // if (settings.showCharts) {
+        //   script.textContent += "settings['showCharts']=false;";
+        // } else {
+        //   script.textContent += `settings['showCharts']=${settings.showCharts};`;
+        // }
+        // if (settings.showTable) {
+        //   script.textContent += "settings['showTable']=false;";
+        // }
+        // else {
+        //   script.textContent += `settings['showTable']=${settings.showTable};`;
+        // }
         (document.head || document.documentElement).appendChild(script);
 
         setTimeout(function () {

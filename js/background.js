@@ -3,10 +3,14 @@
 
 //const request = require("request");
 
+//WIM this would not work anymore. Service worker do not have globals
+
 const STATES = {};
 let GLOBAL = {};
 var activeTabId;
 var tab_id = null;
+var doNotAddDebug = false;
+var settings = {};
 
 /* globals chrome */
 const FILTER_SEARCH = { urls: ["*://*/rest/search/*", "*://*/search/*", "*://*/*/search/*", "*://*/*/CoveoSearch/*", "*://*/?errorsAsSuccess=1", "*://*/*&errorsAsSuccess=1*", "https://*/rest/search/v2*", "https://*/coveo-search/v2*", "https://*/*/rest/search/v2*", "https://*/*/*/rest/search/v2*", "https://*/coveo/rest/v2*", "https://cloudplatform.coveo.com/rest/search/*", "*://platform.cloud.coveo.com/rest/search/v2/*", "https://search.cloud.coveo.com/rest/search/v2/*", "*://*/*/coveo/platform/rest/*", "*://*/coveo/rest/*"] };
@@ -40,8 +44,9 @@ let resetState = (tabId) => {
       tabId,
       loadedScript: false,
       warningSent: false,
+      doNotAddDebug: false,
       enabled: false,
-      document_url: ''
+      //document_url: ''
     };
     let state = STATES[tabId];
     //Add global state
@@ -139,6 +144,16 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       return true;
     }
   }
+  else if (msg.action === 'removeDebug') {
+    getTabId_Then(tabId => {
+      getState_Then(state => {
+        console.log('Remove DEBUG');
+        state.doNotAddDebug = true;
+        doNotAddDebug = true;
+        saveState(state, tabId);
+      });
+    });
+  }
   else if (msg.action === 'contentJsLoaded') {
     getTabId_Then(tabId => {
       getState_Then(state => {
@@ -153,18 +168,22 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   else if (msg.action === 'loadScripts') {
     getTabId_Then(tabId => {
       getState_Then(state => {
-        chrome.tabs.executeScript(state.tabId, {
-          file: '/js/chart.min.js'
-        });
-        chrome.tabs.executeScript(state.tabId, {
-          file: '/js/ajaxhook.min.js'
-        });
-        chrome.tabs.executeScript(state.tabId, {
-          file: '/js/chartlab.min.js'
-        });
-        chrome.tabs.executeScript(state.tabId, {
-          file: '/dependencies/jquery-3.6.0.min.js'
-        });
+        chrome.scripting.executeScript({ target: { tabId: state.tabId }, world: chrome.scripting.ExecutionWorld.MAIN, files: ['js/checkCoveo.js'] },
+          () => { });
+        // chrome.scripting.executeScript({ target: { tabId: state.tabId }, world: chrome.scripting.ExecutionWorld.MAIN, files: ['js/chart.min.js', 'js/ajaxhook.min.js', 'js/chartlab.min.js', 'dependencies/jquery-3.6.0.min.js'] },
+        //   () => { });
+        // chrome.tabs.executeScript(state.tabId, {
+        //   file: '/js/chart.min.js'
+        // });
+        // chrome.tabs.executeScript(state.tabId, {
+        //   file: '/js/ajaxhook.min.js'
+        // });
+        // chrome.tabs.executeScript(state.tabId, {
+        //   file: '/js/chartlab.min.js'
+        // });
+        // chrome.tabs.executeScript(state.tabId, {
+        //   file: '/dependencies/jquery-3.6.0.min.js'
+        // });
       });
     });
     return true;
@@ -371,6 +390,10 @@ let onSearchRequest = function (details) {
   //Can only work if debug is not in the body request!!!
   //remove debug from raw data
   let raw = details.requestBody && details.requestBody.raw;
+  // if (details.requestBody == undefined) {
+  //   details.requestBody = {};
+  // }
+  // details.requestBody['context'] = 'Wim';
   let postedString = getData(raw, {}, events);
   let doDebug = true;
   let debugIsProperly = true;
@@ -380,15 +403,40 @@ let onSearchRequest = function (details) {
       debugIsProperly = false;
     }
   }
-  if (details.url.indexOf("CRSreq=") == -1) {
+  if (doNotAddDebug == true) {
+    doDebug = false;
+    console.log('doNotAddDebug is TRUE');
+    console.log('URL =>' + details.url);
+    newurl = details.url;
+
+    let urlpars = getURLParams(details.url);
+    if (urlpars['debug']) {
+      newurl = newurl.replace('debug=' + urlpars['debug'], '');
+    }
+    if (urlpars['CRIreq']) {
+      newurl = newurl.replace('&CRIreq=' + urlpars['CRSreq'], '');
+    }
+    else {
+      //newurl = newurl + '?CRIreq=' + details.requestId;
+    }
+    /*if (urlpars['CRIreq']) {
+      newurl = newurl.replace('&CRSreq=' + urlpars['CRSreq'], '');
+    }*/
+    console.log('Fixed URL =>' + newurl);
+    return { redirectUrl: newurl };
+    //return;
+  } else {
+    console.log('doNotAddDebug is false');
+  }
+  if (details.url.indexOf("CRIreq=") == -1) {
     console.log('Adding debug=true');
     let url = details.url;
     if (url.indexOf('?') == -1) {
       if (doDebug) {
-        url = url + '?debug=true&CRSreq=' + details.requestId;
+        url = url + '?debug=true&CRIreq=' + details.requestId;
       }
       else {
-        url = url + '?CRSreq=' + details.requestId;
+        url = url + '?CRIreq=' + details.requestId;
       }
     } else {
       //check if debug is already there
@@ -404,28 +452,30 @@ let onSearchRequest = function (details) {
         adddebug = '';
 
       }
-      url = url + adddebug + '&CRSreq=' + details.requestId;
+      url = url + adddebug + '&CRIreq=' + details.requestId;
     }
     newurl = url;
   }
+  //});
 
   //return {redirectUrl: url };
   getState_Then(state => {
-    if (details.url.indexOf("CRSreq=") == -1) return;
-    if (!state.enabled) return;
-    // if (details.statusCode) {
-    //   saveState(state, state.tabId);
-    //   //return;
-    // }
-    if (!doDebug && !debugIsProperly && !state.warningSent) {
-      state.warningSent = true;
-      saveState(state, state.tabId);
-      let msg = {
-        type: "errordebug",
-        global: state
-      };
-      chrome.tabs.sendMessage(state.tabId, msg);
+    if (details.url.indexOf("CRIreq=") != -1) {
+      if (!state.enabled) return;
+      // if (details.statusCode) {
+      //   saveState(state, state.tabId);
+      //   //return;
+      // }
+      if (!doDebug && !debugIsProperly && !state.warningSent) {
+        state.warningSent = true;
+        saveState(state, state.tabId);
+        let msg = {
+          type: "errordebug",
+          global: state
+        };
+        chrome.tabs.sendMessage(state.tabId, msg);
 
+      }
     }
 
     // saveState(thisState, state.tabId);
@@ -437,46 +487,29 @@ let onSearchRequest = function (details) {
     return { redirectUrl: newurl };
 };
 
+// chrome.storage.local.get('allCRIData', data => {
+//   settings = data;
+// });
 
-let addReq = function (details) {
-  details.requestHeaders = details.requestHeaders.filter(rh => rh.name !== 'CSReq');
-  details.requestHeaders.push({ name: 'CSReq', value: details.requestId });
-  return { requestHeaders: details.requestHeaders };
-}
 
-function listener(details) {
-  let filter = chrome.webRequest.filterResponseData(details.requestId);
-  filter.ondata = event => {
-    console.log('Filter data:');
-    console.log(event);
-    console.log(`filter.ondata received ${event.data.byteLength} bytes`);
-    filter.write(event.data);
-  };
-  filter.onstop = event => {
-    // The extension should always call filter.close() or filter.disconnect()
-    // after creating the StreamFilter, otherwise the response is kept alive forever.
-    filter.close();
-  };
-}
+//WIM does not work anymore...
 
 function addAllListeners() {
   //check if listener is already there
-  if (chrome.webRequest.onBeforeRequest.hasListener(onSearchRequest)) {
-    return;
-  }
-  chrome.webRequest.onBeforeRequest.addListener(onSearchRequest, FILTER_SEARCH, ['blocking', 'requestBody', "extraHeaders"]);
-  //chrome.webRequest.onBeforeRequest.addListener(listener, FILTER_SEARCH, ['blocking', 'requestBody', "extraHeaders"]);
-  chrome.webRequest.onCompleted.addListener(onSearchRequest, FILTER_SEARCH, ['responseHeaders']);
+  // if (chrome.webRequest.onBeforeRequest.hasListener(onSearchRequest)) {
+  //   return;
+  // }
+  // chrome.webRequest.onBeforeRequest.addListener(onSearchRequest, FILTER_SEARCH, ['blocking', 'requestBody', "extraHeaders"]);
+  // //chrome.webRequest.onCompleted.addListener(onSearchRequest, FILTER_SEARCH, ['responseHeaders']);
 
 }
 
 function removeAllListeners() {
-  if (chrome.webRequest.onBeforeRequest.hasListener(onSearchRequest)) {
+  // if (chrome.webRequest.onBeforeRequest.hasListener(onSearchRequest)) {
 
-    chrome.webRequest.onBeforeRequest.removeListener(onSearchRequest);
-    //chrome.webRequest.onBeforeRequest.removeListener(listener);
-    chrome.webRequest.onCompleted.removeListener(onSearchRequest);
-  }
+  //   chrome.webRequest.onBeforeRequest.removeListener(onSearchRequest);
+  //   //chrome.webRequest.onCompleted.removeListener(onSearchRequest);
+  // }
 }
 
 
@@ -485,22 +518,22 @@ chrome.tabs.onActivated.addListener(function (activeInfo) {
   getState_Then(state => {
     if (state.enabled) {
       addAllListeners();
-      chrome.browserAction.setIcon({ path: './images/80 B rounded square.png' })
-      chrome.browserAction.setBadgeText({ text: '🏸🔴' })
+      //chrome.action.setIcon({ path: 'images/square.png' })
+      chrome.action.setBadgeText({ text: '🏸🔴' })
 
     } else {
       removeAllListeners();
-      chrome.browserAction.setIcon({ path: './images/80 B rounded square.png' })
-      chrome.browserAction.setBadgeText({ text: '🏸❚❚' })
+      //chrome.action.setIcon({ path: 'images/square.png' })
+      chrome.action.setBadgeText({ text: '🏸❚❚' })
 
     }
   });
 });
 
-chrome.browserAction.setIcon({ path: './images/80 B rounded square.png' });
+//chrome.action.setIcon({ path: 'images/square.png' });
 //chrome.browserAction.setBadgeBackgroundColor({ color: '#1372EC' });
-chrome.browserAction.setBadgeBackgroundColor({ color: [16, 232, 70, 100] });
-chrome.browserAction.setBadgeText({ text: '🏸❚❚' });
+chrome.action.setBadgeBackgroundColor({ color: [16, 232, 70, 100] });
+chrome.action.setBadgeText({ text: '🏸❚❚' });
 
 function setEnabledSearch(enabled) {
   saveState({
@@ -509,21 +542,24 @@ function setEnabledSearch(enabled) {
 
   if (enabled) {
     addAllListeners();
-    chrome.browserAction.setIcon({ path: './images/80 B rounded square.png' })
-    chrome.browserAction.setBadgeText({ text: '🏸🔴' })
+    //chrome.action.setIcon({ path: 'images/square.png' })
+    chrome.action.setBadgeText({ text: '🏸🔴' })
 
   } else {
     removeAllListeners();
-    chrome.browserAction.setIcon({ path: './images/80 B rounded square.png' })
-    chrome.browserAction.setBadgeText({ text: '🏸❚❚' })
+    //chrome.action.setIcon({ path: 'images/square.png' })
+    chrome.action.setBadgeText({ text: '🏸❚❚' })
 
   }
 }
 
 //for Search tokens
 
-chrome.browserAction.onClicked.addListener(function (tab) {
+chrome.action.onClicked.addListener(function (tab) {
   getState_Then(state => {
+    if (state.enabled == false) {
+      doNotAddDebug = false;
+    }
     state.enabled = !state.enabled;
     setEnabledSearch(state.enabled);
     saveState(state, state.tabId);
@@ -541,7 +577,8 @@ chrome.browserAction.onClicked.addListener(function (tab) {
     }
     let msg = {
       type: "enabled",
-      global: state
+      global: state,
+      settings: settings
     };
     chrome.tabs.sendMessage(state.tabId, msg);
   });
